@@ -494,6 +494,12 @@ static int append_cut_filter_args(
     }
 
     if (collapse_audio && enabled_count > 1) {
+        written = snprintf(filter + offset, sizeof(filter) - (size_t)offset, ";");
+        if (written < 0 || written >= (int)(sizeof(filter) - (size_t)offset)) {
+            set_error(error_message, error_message_size, "Cut mix filter graph was too long");
+            return -1;
+        }
+        offset += written;
         for (int i = 0; i < enabled_count; ++i) {
             written = snprintf(filter + offset, sizeof(filter) - (size_t)offset, "[a%d]", i);
             if (written < 0 || written >= (int)(sizeof(filter) - (size_t)offset)) {
