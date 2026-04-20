@@ -18,7 +18,7 @@ if ! command -v ninja >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ ! -f "$toolchain_file" && "$bootstrap_vcpkg" == "1" && "$toolchain_file" == "$vcpkg_root/scripts/buildsystems/vcpkg.cmake" ]]; then
+if [[ "$bootstrap_vcpkg" == "1" && "$toolchain_file" == "$vcpkg_root/scripts/buildsystems/vcpkg.cmake" ]]; then
     if [[ ! -d "$vcpkg_root/.git" ]]; then
         git clone https://github.com/microsoft/vcpkg "$vcpkg_root"
     fi
