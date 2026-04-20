@@ -7,6 +7,8 @@ vcpkg_root="${VCPKG_ROOT:-$HOME/vcpkg}"
 toolchain_file="${CMAKE_TOOLCHAIN_FILE:-$vcpkg_root/scripts/buildsystems/vcpkg.cmake}"
 cross_file="${CLIPCUT_MINGW_TOOLCHAIN:-cmake/toolchains/mingw-w64-x86_64.cmake}"
 bootstrap_vcpkg="${CLIPCUT_BOOTSTRAP_VCPKG:-1}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cross_file_abs="$(realpath "$script_dir/../${cross_file#./}")"
 
 if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
     echo "missing x86_64-w64-mingw32-gcc; install mingw-w64-gcc" >&2
@@ -39,8 +41,9 @@ fi
 
 cmake -S . -B "$build_dir" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" \
-    -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$cross_file" \
-    -DVCPKG_TARGET_TRIPLET="$triplet"
+    -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$cross_file_abs" \
+    -DVCPKG_TARGET_TRIPLET="$triplet" \
+    -DVCPKG_APPLOCAL_DEPS=OFF
 
 cmake --build "$build_dir"
 
