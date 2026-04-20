@@ -1,0 +1,15 @@
+build/
+build-*/
+*.user
+*.suo
+*.vcxproj.user
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+*.mp4.clipcut.mp4
+*.track*.mp3
+.DS_Store
