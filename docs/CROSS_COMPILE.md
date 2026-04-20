@@ -68,6 +68,12 @@ For a portable folder, use:
 ./tools/package_windows_cross.sh
 ```
 
+To produce a single zip with `ffmpeg.exe` included, run:
+
+```bash
+./tools/make_windows_portable_zip.sh
+```
+
 That stages:
 
 - `build-win-cross-release/clipcut.exe`
