@@ -8,7 +8,7 @@ mingw_bin="${MINGW_BIN:-/usr/x86_64-w64-mingw32/bin}"
 package_dir="${PACKAGE_DIR:-dist/windows}"
 portable_dir="${PORTABLE_DIR:-dist/clipcut-windows-portable}"
 zip_path="${ZIP_PATH:-dist/clipcut-windows-portable.zip}"
-ffmpeg_asset="${FFMPEG_ASSET:-ffmpeg-n8.1-latest-win64-lgpl-8.1.zip}"
+ffmpeg_asset="${FFMPEG_ASSET:-ffmpeg-n8.1-latest-win64-gpl-8.1.zip}"
 ffmpeg_root="${ffmpeg_asset%.zip}"
 
 rm -rf "$portable_dir"

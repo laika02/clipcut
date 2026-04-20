@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <process.h>
 #else
 #include <errno.h>
 #include <sys/wait.h>
@@ -19,80 +20,67 @@ static void set_error(char *dst, int dst_size, const char *message) {
 }
 
 #ifdef _WIN32
-static int append_quoted_arg(char *buffer, size_t buffer_size, size_t *offset, const char *arg) {
-    if (*offset + 3 >= buffer_size) {
-        return -1;
-    }
-
-    if (*offset > 0) {
-        buffer[(*offset)++] = ' ';
-    }
-    buffer[(*offset)++] = '"';
-
-    size_t backslashes = 0;
-    for (size_t i = 0; arg[i] != '\0'; ++i) {
-        if (arg[i] == '\\') {
-            backslashes++;
-            continue;
-        }
-
-        if (arg[i] == '"') {
-            if (*offset + (backslashes * 2u) + 2u >= buffer_size) {
-                return -1;
-            }
-            for (size_t slash = 0; slash < (backslashes * 2u) + 1u; ++slash) {
-                buffer[(*offset)++] = '\\';
-            }
-            buffer[(*offset)++] = '"';
-            backslashes = 0;
-            continue;
-        }
-
-        if (*offset + backslashes + 2u >= buffer_size) {
-            return -1;
-        }
-        for (size_t slash = 0; slash < backslashes; ++slash) {
-            buffer[(*offset)++] = '\\';
-        }
-        buffer[(*offset)++] = arg[i];
-        backslashes = 0;
-    }
-
-    if (*offset + (backslashes * 2u) + 2u >= buffer_size) {
-        return -1;
-    }
-    for (size_t slash = 0; slash < backslashes * 2u; ++slash) {
-        buffer[(*offset)++] = '\\';
-    }
-    buffer[(*offset)++] = '"';
-    buffer[*offset] = '\0';
-    return 0;
+static int contains_path_separator(const char *path) {
+    return path != NULL && (strchr(path, '\\') != NULL || strchr(path, '/') != NULL || strchr(path, ':') != NULL);
 }
 
-static int build_windows_command_line(const ExportCommand *command, char **out, char *error_message, int error_message_size) {
-    size_t capacity = 256;
-    char *buffer = calloc(capacity, 1);
-    if (buffer == NULL) {
-        set_error(error_message, error_message_size, "Failed to allocate process command line");
+static int build_adjacent_executable_path(const char *exe_name, char *buffer, size_t buffer_size) {
+    char module_path[MAX_PATH * 4] = {0};
+    const DWORD written = GetModuleFileNameA(NULL, module_path, (DWORD)sizeof(module_path));
+    if (written == 0 || written >= sizeof(module_path)) {
         return -1;
     }
 
-    size_t offset = 0;
-    for (int i = 0; i < command->argc; ++i) {
-        while (append_quoted_arg(buffer, capacity, &offset, command->argv[i]) != 0) {
-            capacity *= 2;
-            char *resized = realloc(buffer, capacity);
-            if (resized == NULL) {
-                free(buffer);
-                set_error(error_message, error_message_size, "Failed to grow process command line");
-                return -1;
-            }
-            buffer = resized;
-            memset(buffer + offset, 0, capacity - offset);
-        }
+    char *last_sep = strrchr(module_path, '\\');
+    char *last_fwd = strrchr(module_path, '/');
+    if (last_fwd != NULL && (last_sep == NULL || last_fwd > last_sep)) {
+        last_sep = last_fwd;
+    }
+    if (last_sep == NULL) {
+        return -1;
+    }
+    *(last_sep + 1) = '\0';
+
+    const int out_written = snprintf(buffer, buffer_size, "%s%s", module_path, exe_name);
+    return out_written > 0 && out_written < (int)buffer_size ? 0 : -1;
+}
+
+static int resolve_windows_command_path(
+    const ExportCommand *command,
+    char *buffer,
+    size_t buffer_size,
+    char *error_message,
+    int error_message_size
+) {
+    if (command == NULL || command->argc <= 0 || command->argv == NULL || command->argv[0] == NULL) {
+        set_error(error_message, error_message_size, "Missing executable to run");
+        return -1;
     }
 
-    *out = buffer;
+    if (contains_path_separator(command->argv[0])) {
+        const int written = snprintf(buffer, buffer_size, "%s", command->argv[0]);
+        if (written < 0 || written >= (int)buffer_size) {
+            set_error(error_message, error_message_size, "Executable path was too long");
+            return -1;
+        }
+        return 0;
+    }
+
+    const char *exe_name = command->argv[0];
+    char candidate[512] = {0};
+    if (strchr(exe_name, '.') == NULL) {
+        const int written = snprintf(candidate, sizeof(candidate), "%s.exe", exe_name);
+        if (written < 0 || written >= (int)sizeof(candidate)) {
+            set_error(error_message, error_message_size, "Executable name was too long");
+            return -1;
+        }
+        exe_name = candidate;
+    }
+
+    if (build_adjacent_executable_path(exe_name, buffer, buffer_size) != 0) {
+        set_error(error_message, error_message_size, "Failed to resolve adjacent executable path");
+        return -1;
+    }
     return 0;
 }
 #endif
@@ -112,40 +100,30 @@ int export_run_command_sync(
     }
 
 #ifdef _WIN32
-    char *command_line = NULL;
-    if (build_windows_command_line(command, &command_line, error_message, error_message_size) != 0) {
+    char executable_path[MAX_PATH * 4] = {0};
+    if (resolve_windows_command_path(command, executable_path, sizeof(executable_path), error_message, error_message_size) != 0) {
         return -1;
     }
 
-    STARTUPINFOA startup_info;
-    PROCESS_INFORMATION process_info;
-    memset(&startup_info, 0, sizeof(startup_info));
-    memset(&process_info, 0, sizeof(process_info));
-    startup_info.cb = sizeof(startup_info);
+    char **argv = calloc((size_t)command->argc + 1u, sizeof(*argv));
+    if (argv == NULL) {
+        set_error(error_message, error_message_size, "Failed to allocate process argv");
+        return -1;
+    }
+    argv[0] = executable_path;
+    for (int i = 1; i < command->argc; ++i) {
+        argv[i] = command->argv[i];
+    }
+    argv[command->argc] = NULL;
 
-    BOOL ok = CreateProcessA(
-        NULL,
-        command_line,
-        NULL,
-        NULL,
-        FALSE,
-        0,
-        NULL,
-        NULL,
-        &startup_info,
-        &process_info
-    );
-    free(command_line);
-    if (!ok) {
-        set_error(error_message, error_message_size, "CreateProcess failed");
+    const intptr_t child = _spawnv(_P_WAIT, executable_path, (const char * const *)argv);
+    free(argv);
+    if (child == -1) {
+        set_error(error_message, error_message_size, "Failed to spawn process");
         return -1;
     }
 
-    WaitForSingleObject(process_info.hProcess, INFINITE);
-    DWORD exit_code = 1;
-    GetExitCodeProcess(process_info.hProcess, &exit_code);
-    CloseHandle(process_info.hThread);
-    CloseHandle(process_info.hProcess);
+    const DWORD exit_code = (DWORD)child;
     if (result != NULL) {
         result->exit_code = (int)exit_code;
     }
