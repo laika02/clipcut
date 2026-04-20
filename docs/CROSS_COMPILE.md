@@ -40,16 +40,16 @@ VCPKG_ROOT=$HOME/vcpkg ./tools/build_windows_cross.sh
 The expected output is:
 
 ```text
-build-win-cross/clipcut.exe
+build-win-cross-release/clipcut.exe
 ```
 
 ## Run With Wine
 
-The dynamic vcpkg triplet requires DLLs from the vcpkg install directory. One quick test path:
+The dynamic vcpkg triplet requires DLLs from the vcpkg install directory, plus the MinGW runtime DLLs from `/usr/x86_64-w64-mingw32/bin`. One quick test path:
 
 ```bash
 export WINEPATH="$HOME/vcpkg/installed/x64-mingw-dynamic/bin"
-wine build-win-cross/clipcut.exe
+wine build-win-cross-release/clipcut.exe
 ```
 
 For export jobs, `ffmpeg.exe` must also be available to the Windows process. Use either:
@@ -62,11 +62,18 @@ or copy a Windows `ffmpeg.exe` next to `clipcut.exe`.
 
 ## Packaging Notes
 
-For a portable folder, copy:
+For a portable folder, use:
 
-- `build-win-cross/clipcut.exe`
+```bash
+./tools/package_windows_cross.sh
+```
+
+That stages:
+
+- `build-win-cross-release/clipcut.exe`
 - SDL2 DLLs from `~/vcpkg/installed/x64-mingw-dynamic/bin`
 - FFmpeg DLLs from `~/vcpkg/installed/x64-mingw-dynamic/bin`
-- `ffmpeg.exe` for export/extract jobs
+- MinGW runtime DLLs from `/usr/x86_64-w64-mingw32/bin`
+- FFmpeg tools from `~/vcpkg/installed/x64-mingw-dynamic/bin`
 
 Static linking may be possible with `x64-mingw-static`, but dynamic is the simpler first target because FFmpeg static dependency closure can be large and brittle.

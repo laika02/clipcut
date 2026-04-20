@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-build_dir="${BUILD_DIR:-build-win-cross}"
+build_dir="${BUILD_DIR:-build-win-cross-release}"
 triplet="${VCPKG_TARGET_TRIPLET:-x64-mingw-dynamic}"
 vcpkg_root="${VCPKG_ROOT:-$HOME/vcpkg}"
 toolchain_file="${CMAKE_TOOLCHAIN_FILE:-$vcpkg_root/scripts/buildsystems/vcpkg.cmake}"
@@ -43,7 +43,8 @@ cmake -S . -B "$build_dir" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" \
     -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$cross_file_abs" \
     -DVCPKG_TARGET_TRIPLET="$triplet" \
-    -DVCPKG_APPLOCAL_DEPS=OFF
+    -DVCPKG_APPLOCAL_DEPS=OFF \
+    -DCMAKE_BUILD_TYPE=Release
 
 cmake --build "$build_dir"
 
