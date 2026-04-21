@@ -53,6 +53,9 @@ typedef struct AppState {
     ExportProfile export_profile;
     size_t solo_audio_track_index;
     double solo_audio_start_sec;
+    bool export_filename_prompt_active;
+    char export_filename_prompt[256];
+    size_t export_filename_prompt_len;
     char last_error[256];
 } AppState;
 
@@ -393,6 +396,63 @@ static void draw_keybind_hints(SDL_Renderer *renderer, SDL_Rect preview, SDL_Rec
     }
 }
 
+static void draw_export_filename_prompt(SDL_Renderer *renderer, int width, int height, const AppState *state) {
+    if (state == NULL || !state->export_filename_prompt_active) {
+        return;
+    }
+
+    SDL_Rect overlay = {
+        .x = 0,
+        .y = 0,
+        .w = width,
+        .h = height,
+    };
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 132);
+    SDL_RenderFillRect(renderer, &overlay);
+
+    SDL_Rect box = {
+        .x = (width - 560) / 2,
+        .y = (height - 122) / 2,
+        .w = 560,
+        .h = 122,
+    };
+    SDL_SetRenderDrawColor(renderer, 24, 28, 34, 245);
+    SDL_RenderFillRect(renderer, &box);
+    SDL_SetRenderDrawColor(renderer, 118, 148, 184, 255);
+    SDL_RenderDrawRect(renderer, &box);
+
+    bitmap_text_draw(renderer, box.x + 18, box.y + 16, 1, (SDL_Color){221, 232, 245, 255}, "EXPORT FILENAME");
+    bitmap_text_draw(renderer, box.x + 18, box.y + 36, 1, (SDL_Color){123, 142, 164, 255}, "ENTER TO USE DEFAULT");
+    bitmap_text_draw(renderer, box.x + 18, box.y + 54, 1, (SDL_Color){123, 142, 164, 255}, "ESC TO CANCEL");
+
+    SDL_Rect input = {
+        .x = box.x + 16,
+        .y = box.y + 74,
+        .w = box.w - 32,
+        .h = 28,
+    };
+    SDL_SetRenderDrawColor(renderer, 15, 18, 23, 255);
+    SDL_RenderFillRect(renderer, &input);
+    SDL_SetRenderDrawColor(renderer, 84, 95, 112, 255);
+    SDL_RenderDrawRect(renderer, &input);
+
+    char display[280] = {0};
+    if (state->export_filename_prompt[0] != '\0') {
+        snprintf(display, sizeof(display), "%s", state->export_filename_prompt);
+    } else {
+        snprintf(display, sizeof(display), "%s", "");
+    }
+    const size_t display_len = strlen(display);
+    if (display_len > 0) {
+        bitmap_text_draw(renderer, input.x + 10, input.y + 9, 1, (SDL_Color){228, 238, 250, 255}, display);
+    } else {
+        bitmap_text_draw(renderer, input.x + 10, input.y + 9, 1, (SDL_Color){95, 110, 128, 255}, "TYPE A NAME OR LEAVE BLANK");
+    }
+
+    bitmap_text_draw(renderer, box.x + 18, box.y + 106, 1, (SDL_Color){245, 206, 102, 255}, "ENTER EXPORT  ESC CANCEL");
+}
+
 static SDL_Rect compute_preview_rect(
     const ProjectState *project,
     int window_width,
@@ -585,6 +645,120 @@ static int build_default_export_path(const ProjectState *project, char *buffer, 
     return written >= 0 && written < (int)buffer_size ? 0 : -1;
 }
 
+static int increment_path_if_exists(char *path, size_t path_size);
+
+static void trim_ascii_whitespace_inplace(char *value) {
+    if (value == NULL) {
+        return;
+    }
+
+    char *start = value;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+        start++;
+    }
+    if (start != value) {
+        memmove(value, start, strlen(start) + 1u);
+    }
+
+    size_t len = strlen(value);
+    while (len > 0 && (value[len - 1u] == ' ' || value[len - 1u] == '\t' || value[len - 1u] == '\r' || value[len - 1u] == '\n')) {
+        value[len - 1u] = '\0';
+        len--;
+    }
+}
+
+static const char *path_basename(const char *path) {
+    const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+    const char *backslash = strrchr(path, '\\');
+    if (backslash != NULL && (slash == NULL || backslash > slash)) {
+        slash = backslash;
+    }
+#endif
+    return slash != NULL ? slash + 1 : path;
+}
+
+static bool path_has_separator(const char *path) {
+    return path != NULL && (strchr(path, '/') != NULL
+#ifdef _WIN32
+        || strchr(path, '\\') != NULL || strchr(path, ':') != NULL
+#endif
+    );
+}
+
+static bool basename_has_extension(const char *path) {
+    if (path == NULL || path[0] == '\0') {
+        return false;
+    }
+
+    const char *base = path_basename(path);
+    const char *dot = strrchr(base, '.');
+    return dot != NULL && dot != base && dot[1] != '\0';
+}
+
+static int build_export_output_path_from_prompt(
+    const ProjectState *project,
+    const char *prompt_text,
+    char *buffer,
+    size_t buffer_size
+) {
+    if (project == NULL || project->source_path == NULL || buffer == NULL || buffer_size == 0) {
+        return -1;
+    }
+
+    char trimmed[1024] = {0};
+    if (prompt_text != NULL) {
+        snprintf(trimmed, sizeof(trimmed), "%s", prompt_text);
+    }
+    trim_ascii_whitespace_inplace(trimmed);
+
+    if (trimmed[0] == '\0') {
+        if (build_default_export_path(project, buffer, buffer_size) != 0) {
+            return -1;
+        }
+        return increment_path_if_exists(buffer, buffer_size);
+    }
+
+    if (path_has_separator(trimmed)) {
+        if (snprintf(buffer, buffer_size, "%s", trimmed) >= (int)buffer_size) {
+            return -1;
+        }
+    } else {
+        const char *source_sep = strrchr(project->source_path, '/');
+#ifdef _WIN32
+        const char *source_backslash = strrchr(project->source_path, '\\');
+        if (source_backslash != NULL && (source_sep == NULL || source_backslash > source_sep)) {
+            source_sep = source_backslash;
+        }
+#endif
+        if (source_sep != NULL) {
+            const size_t dir_len = (size_t)(source_sep - project->source_path + 1);
+            if (dir_len >= buffer_size) {
+                return -1;
+            }
+            memcpy(buffer, project->source_path, dir_len);
+            buffer[dir_len] = '\0';
+            if (snprintf(buffer + dir_len, buffer_size - dir_len, "%s", trimmed) >= (int)(buffer_size - dir_len)) {
+                return -1;
+            }
+        } else {
+            if (snprintf(buffer, buffer_size, "%s", trimmed) >= (int)buffer_size) {
+                return -1;
+            }
+        }
+    }
+
+    if (!basename_has_extension(buffer)) {
+        const size_t len = strlen(buffer);
+        if (len + 4u >= buffer_size) {
+            return -1;
+        }
+        memcpy(buffer + len, ".mp4", 5u);
+    }
+
+    return increment_path_if_exists(buffer, buffer_size);
+}
+
 static bool path_exists(const char *path) {
     if (path == NULL || path[0] == '\0') {
         return false;
@@ -651,19 +825,19 @@ static int build_default_mp3_path(
     return written >= 0 && written < (int)buffer_size ? 0 : -1;
 }
 
-static int run_export(AppState *state) {
-    char output_path[1024] = {0};
+static int run_export_with_output_path(AppState *state, const char *output_path) {
+    if (state == NULL || output_path == NULL || output_path[0] == '\0') {
+        return -1;
+    }
+
+    if (state->transport.playback_state == PLAYBACK_PLAYING) {
+        transport_pause(&state->transport);
+        audio_stream_stop(&state->audio_stream);
+        transport_apply_to_project(&state->transport, &state->project);
+    }
+
     char display[4096] = {0};
     ExportCommand command = {0};
-
-    if (build_default_export_path(&state->project, output_path, sizeof(output_path)) != 0) {
-        snprintf(state->last_error, sizeof(state->last_error), "%s", "Failed to build default export path");
-        return -1;
-    }
-    if (increment_path_if_exists(output_path, sizeof(output_path)) != 0) {
-        snprintf(state->last_error, sizeof(state->last_error), "%s", "Failed to build unique export path");
-        return -1;
-    }
 
     if (export_build_ffmpeg_command(
             &state->project,
@@ -743,6 +917,98 @@ static int run_mp3_extract(AppState *state, size_t audio_track_index) {
     fprintf(stderr, "MP3 extract started: %s\n", output_path);
     export_command_reset(&command);
     state->last_error[0] = '\0';
+    return 0;
+}
+
+static void start_export_filename_prompt(AppState *state, SDL_Window *window) {
+    if (state == NULL) {
+        return;
+    }
+
+    state->export_filename_prompt_active = true;
+    state->export_filename_prompt[0] = '\0';
+    state->export_filename_prompt_len = 0;
+    SDL_StartTextInput();
+    SDL_Rect prompt_rect = {
+        .x = 0,
+        .y = 0,
+        .w = 1,
+        .h = 1,
+    };
+    SDL_SetTextInputRect(&prompt_rect);
+    (void)window;
+}
+
+static void stop_export_filename_prompt(AppState *state) {
+    if (state == NULL) {
+        return;
+    }
+
+    state->export_filename_prompt_active = false;
+    state->export_filename_prompt[0] = '\0';
+    state->export_filename_prompt_len = 0;
+    SDL_StopTextInput();
+}
+
+static void append_export_filename_prompt_text(AppState *state, const char *text) {
+    if (state == NULL || text == NULL || text[0] == '\0') {
+        return;
+    }
+
+    const size_t current_len = strlen(state->export_filename_prompt);
+    const size_t add_len = strlen(text);
+    if (current_len + add_len >= sizeof(state->export_filename_prompt)) {
+        return;
+    }
+    memcpy(state->export_filename_prompt + current_len, text, add_len + 1u);
+    state->export_filename_prompt_len = current_len + add_len;
+}
+
+static void backspace_export_filename_prompt(AppState *state) {
+    if (state == NULL) {
+        return;
+    }
+
+    size_t len = strlen(state->export_filename_prompt);
+    if (len == 0) {
+        state->export_filename_prompt_len = 0;
+        return;
+    }
+
+    while (len > 0) {
+        len--;
+        unsigned char byte = (unsigned char)state->export_filename_prompt[len];
+        if ((byte & 0xC0u) != 0x80u) {
+            state->export_filename_prompt[len] = '\0';
+            state->export_filename_prompt_len = len;
+            return;
+        }
+    }
+
+    state->export_filename_prompt[0] = '\0';
+    state->export_filename_prompt_len = 0;
+}
+
+static int submit_export_filename_prompt(AppState *state) {
+    if (state == NULL) {
+        return -1;
+    }
+
+    char output_path[1024] = {0};
+    if (build_export_output_path_from_prompt(
+            &state->project,
+            state->export_filename_prompt,
+            output_path,
+            sizeof(output_path)
+        ) != 0) {
+        snprintf(state->last_error, sizeof(state->last_error), "%s", "Failed to build export filename");
+        return -1;
+    }
+    if (run_export_with_output_path(state, output_path) != 0) {
+        return -1;
+    }
+
+    stop_export_filename_prompt(state);
     return 0;
 }
 
@@ -1060,6 +1326,8 @@ static void draw_placeholder(
         draw_empty_state(renderer, preview, sidebar);
     }
 
+    draw_export_filename_prompt(renderer, width, height, state);
+
     SDL_RenderPresent(renderer);
 }
 
@@ -1279,6 +1547,21 @@ int app_run(const AppConfig *config) {
                 } else {
                     running = false;
                 }
+            } else if (state.export_filename_prompt_active) {
+                if (event.type == SDL_TEXTINPUT) {
+                    append_export_filename_prompt_text(&state, event.text.text);
+                } else if (event.type == SDL_KEYDOWN) {
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        stop_export_filename_prompt(&state);
+                        update_window_title(window, config, &state);
+                    } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
+                        backspace_export_filename_prompt(&state);
+                    } else if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_KP_ENTER) {
+                        if (submit_export_filename_prompt(&state) == 0) {
+                            update_window_title(window, config, &state);
+                        }
+                    }
+                }
             } else if (event.type == SDL_DROPFILE) {
                 load_media(window, renderer, config, &state, event.drop.file);
                 SDL_free(event.drop.file);
@@ -1321,10 +1604,7 @@ int app_run(const AppConfig *config) {
                     if (export_worker_is_running(&state.export_worker)) {
                         snprintf(state.last_error, sizeof(state.last_error), "%s", "Export already running");
                     } else {
-                        transport_pause(&state.transport);
-                        audio_stream_stop(&state.audio_stream);
-                        transport_apply_to_project(&state.transport, &state.project);
-                        (void)run_export(&state);
+                        start_export_filename_prompt(&state, window);
                     }
                     update_window_title(window, config, &state);
                 } else if (event.key.keysym.sym == SDLK_j) {
@@ -1412,10 +1692,7 @@ int app_run(const AppConfig *config) {
                     if (export_worker_is_running(&state.export_worker)) {
                         snprintf(state.last_error, sizeof(state.last_error), "%s", "Export already running");
                     } else {
-                        transport_pause(&state.transport);
-                        audio_stream_stop(&state.audio_stream);
-                        transport_apply_to_project(&state.transport, &state.project);
-                        (void)run_export(&state);
+                        start_export_filename_prompt(&state, window);
                     }
                     update_window_title(window, config, &state);
                 } else if (left_mouse_down) {

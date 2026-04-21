@@ -3,6 +3,10 @@
 #include <stdint.h>
 
 static uint8_t glyph_row(char c, int row) {
+    if (c >= 'a' && c <= 'z') {
+        c = (char)(c - ('a' - 'A'));
+    }
+
     switch (c) {
         case 'A': { static const uint8_t rows[7] = {14, 17, 17, 31, 17, 17, 17}; return rows[row]; }
         case 'B': { static const uint8_t rows[7] = {30, 17, 17, 30, 17, 17, 30}; return rows[row]; }
@@ -44,6 +48,9 @@ static uint8_t glyph_row(char c, int row) {
         case '.': { static const uint8_t rows[7] = {0, 0, 0, 0, 0, 12, 12}; return rows[row]; }
         case ':': { static const uint8_t rows[7] = {0, 12, 12, 0, 12, 12, 0}; return rows[row]; }
         case '-': { static const uint8_t rows[7] = {0, 0, 0, 31, 0, 0, 0}; return rows[row]; }
+        case '_': { static const uint8_t rows[7] = {0, 0, 0, 0, 0, 0, 31}; return rows[row]; }
+        case '(': { static const uint8_t rows[7] = {2, 4, 8, 8, 8, 4, 2}; return rows[row]; }
+        case ')': { static const uint8_t rows[7] = {8, 4, 2, 2, 2, 4, 8}; return rows[row]; }
         case '>': { static const uint8_t rows[7] = {16, 8, 4, 2, 4, 8, 16}; return rows[row]; }
         case ' ': return 0;
         default: { static const uint8_t rows[7] = {31, 1, 2, 4, 8, 0, 8}; return rows[row]; }
