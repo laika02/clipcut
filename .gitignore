@@ -1,16 +1,58 @@
-build/
-build-*/
-dist/
-*.user
-*.suo
-*.vcxproj.user
+# CMake build directories
+/build/
+/build-*/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+Makefile
+
+# Distribution artifacts
+/dist/
+*.AppImage
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+
+# Compiled binaries and objects
+*.o
 *.obj
-*.pdb
-*.ilk
-*.exe
+*.a
+*.so
+*.so.*
 *.dll
-*.lib
-*.exp
-*.mp4.clipcut.mp4
-*.track*.mp3
-.DS_Store
+*.exe
+*.pdb
+
+# Qt generated files
+*_autogen/
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.jsc
+
+# Local backups
+/backups/
+
+# Editor and temporary files
+.cache/
+.idea/
+.vscode/
+*.swp
+*~
+*.log
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Local dependencies and Wine environment
+/.deps/
